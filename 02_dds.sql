@@ -1,9 +1,11 @@
--- 1. Создание таблиц DDS
+-- 1. Очистка таблиц DDS
 DROP TABLE IF EXISTS dds.dim_customers CASCADE;
 DROP TABLE IF EXISTS dds.dim_channels CASCADE;
 DROP TABLE IF EXISTS dds.dim_campaigns CASCADE;
 DROP TABLE IF EXISTS dds.fact_orders CASCADE;
 DROP TABLE IF EXISTS dds.fact_order_items CASCADE;
+
+-- 2. Создание таблиц DDS
 
 CREATE TABLE dds.dim_customers (
     customer_id INT,
@@ -47,6 +49,7 @@ CREATE TABLE dds.fact_orders (
 PARTITION BY RANGE (order_dt)
 (START ('2023-01-01'::date) END ('2024-01-01'::date) EVERY ('1 month'::interval));
 
+-- DISTRIBUTED BY (order_id) для корректного джойна
 CREATE TABLE dds.fact_order_items (
     order_item_id INT,
     order_id INT,
@@ -56,9 +59,9 @@ CREATE TABLE dds.fact_order_items (
     price NUMERIC(10, 2),
     load_dt TIMESTAMP DEFAULT NOW(),
     load_src VARCHAR(50) DEFAULT 'stg.order_items'
-) DISTRIBUTED BY (order_item_id);
+) DISTRIBUTED BY (order_id);
 
--- 2. Наполнение DDS
+-- 3. Наполнение DDS
 INSERT INTO dds.dim_customers (customer_id, customer_name, signup_dt, region, customer_segment)
 SELECT DISTINCT customer_id, customer_name, signup_dt, region, customer_segment FROM stg.customers;
 
@@ -74,6 +77,6 @@ SELECT order_id, order_dt, customer_id, campaign_id, order_amount, order_status 
 INSERT INTO dds.fact_order_items (order_item_id, order_id, product_id, product_name, quantity, price)
 SELECT order_item_id, order_id, product_id, product_name, quantity, price FROM stg.order_items;
 
--- 3. Оптимизация (статистика)
+-- 4. Обновление статистики
 ANALYZE dds.fact_orders;
 ANALYZE dds.fact_order_items;
