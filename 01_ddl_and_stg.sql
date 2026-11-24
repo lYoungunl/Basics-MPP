@@ -11,7 +11,6 @@ DROP TABLE IF EXISTS stg.channels CASCADE;
 DROP TABLE IF EXISTS stg.customers CASCADE;
 
 -- 3. Создание таблиц STG
-
 CREATE TABLE stg.customers (
     customer_id INT,
     customer_name VARCHAR(100),
@@ -46,7 +45,6 @@ CREATE TABLE stg.orders (
 PARTITION BY RANGE (order_dt)
 (START ('2023-01-01'::date) END ('2024-01-01'::date) EVERY ('1 month'::interval));
 
--- DISTRIBUTED BY (order_id) для корректного джойна
 CREATE TABLE stg.order_items (
     order_item_id INT,
     order_id INT,
@@ -66,16 +64,32 @@ INSERT INTO stg.channels (channel_id, channel_name, channel_type)
 SELECT i, 'Channel_' || i, (ARRAY['Social', 'Search', 'Email', 'Display'])[i]
 FROM generate_series(1, 4) AS i;
 
--- Кампании: start_dt и end_dt
 INSERT INTO stg.campaigns (campaign_id, campaign_name, channel_id, start_dt, end_dt, budget)
 SELECT i, 'Campaign_' || i, 1 + (i % 4), '2023-01-01'::date + (i * 10), '2023-01-01'::date + (i * 10) + 30, (random() * 10000 + 1000)::numeric(10,2)
 FROM generate_series(1, 10) AS i;
 
+-- Генерация заказов с гарантированным распределением по кампаниям
 INSERT INTO stg.orders (order_id, order_dt, customer_id, campaign_id, order_amount, order_status)
-SELECT i, '2023-01-01'::date + (random() * 300)::int, 1 + (random() * 99)::int, 1 + (random() * 9)::int, (random() * 5000 + 100)::numeric(10,2), (ARRAY['completed', 'cancelled', 'returned'])[1 + (random() * 2)::int]
-FROM generate_series(1, 600) AS i;
+SELECT 
+    gen.i AS order_id,
+    -- Дата заказа: start_dt кампании + случайный день внутри её окна
+    (c.start_dt + (gen.rnd_day * (c.end_dt - c.start_dt))::int) AS order_dt,
+    -- Случайный клиент, который зарегистрировался до этой даты
+    (SELECT customer_id FROM stg.customers WHERE signup_dt <= (c.start_dt + (gen.rnd_day * (c.end_dt - c.start_dt))::int) ORDER BY random() LIMIT 1) AS customer_id,
+    c.campaign_id,
+    (random() * 5000 + 100)::numeric(10,2),
+    (ARRAY['completed', 'cancelled', 'returned'])[1 + (random() * 2)::int]
+FROM (
+    -- Генерируем 600 строк, для каждой случайный ID кампании (от 1 до 10) и случайный день
+    SELECT i, 
+           (random() * 9)::int + 1 AS rnd_campaign, -- от 1 до 10
+           random() AS rnd_day -- от 0 до 1
+    FROM generate_series(1, 600) AS i
+) AS gen
+JOIN stg.campaigns c ON c.campaign_id = gen.rnd_campaign
+ORDER BY i;
 
--- Привязка order_id к реальным заказам
+-- Позиции заказов
 INSERT INTO stg.order_items (order_item_id, order_id, product_id, product_name, quantity, price)
 SELECT i, (i % 600) + 1, 1 + (random() * 50)::int, 'Product_' || (1 + (random() * 50)::int), 1 + (random() * 5)::int, (random() * 1000 + 50)::numeric(10,2)
 FROM generate_series(1, 2000) AS i;

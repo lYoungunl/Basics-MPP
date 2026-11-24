@@ -32,13 +32,13 @@ campaign_calendar AS (
         d::date AS report_dt,
         c.end_dt,
         c.start_dt,
-        -- Округляем ежедневный расход сразу до 2 знаков, чтобы избежать накопления ошибки
+        -- Округляем ежедневный расход сразу до 2 знаков
         ROUND((c.budget / (c.end_dt - c.start_dt + 1))::numeric, 2) AS daily_spend
     FROM dds.dim_campaigns c
     JOIN dds.dim_channels ch ON c.channel_id = ch.channel_id
     CROSS JOIN generate_series(c.start_dt, c.end_dt, '1 day'::interval) AS d
 ),
--- 2. Корректируем последний день, чтобы сумма точно совпала с бюджетом
+-- 2. Корректируем последний день
 campaign_calendar_fixed AS (
     SELECT 
         campaign_id,
@@ -48,7 +48,6 @@ campaign_calendar_fixed AS (
         budget,
         report_dt,
         CASE 
-            -- Если это последний день, вычитаем из бюджета сумму предыдущих дней
             WHEN report_dt = end_dt THEN 
                 budget - (daily_spend * (end_dt - start_dt))
             ELSE daily_spend
@@ -71,20 +70,21 @@ order_stats AS (
 -- 4. Считаем новых клиентов
 new_cust AS (
     SELECT 
-        MIN(o.order_dt) AS first_order_dt,
-        o.campaign_id,
-        o.customer_id
-    FROM dds.fact_orders o
-    WHERE o.order_status = 'completed'
-    GROUP BY o.campaign_id, o.customer_id
+        customer_id,
+        MIN(order_dt) AS first_order_dt
+    FROM dds.fact_orders
+    WHERE order_status = 'completed'
+    GROUP BY customer_id
 ),
 new_cust_agg AS (
     SELECT 
-        first_order_dt AS report_dt,
-        campaign_id,
-        COUNT(DISTINCT customer_id) AS new_customers
-    FROM new_cust
-    GROUP BY first_order_dt, campaign_id
+        f.campaign_id,
+        f.order_dt AS report_dt,
+        COUNT(DISTINCT n.customer_id) AS new_customers
+    FROM dds.fact_orders f
+    JOIN new_cust n ON f.customer_id = n.customer_id AND f.order_dt = n.first_order_dt
+    WHERE f.order_status = 'completed'
+    GROUP BY f.campaign_id, f.order_dt
 )
 -- 5. Собираем всё вместе
 SELECT 
@@ -99,13 +99,13 @@ SELECT
     COALESCE(s.avg_order_amount, 0) AS avg_order_amount,
     COALESCE(n.new_customers, 0) AS new_customers,
     cal.budget AS campaign_budget,
-    cal.spend, -- ИСПРАВЛЕНО: берем из правильного CTE
+    cal.spend,
     COALESCE(s.revenue, 0) AS revenue,
     CASE 
         WHEN cal.spend > 0 THEN ((COALESCE(s.revenue, 0) - cal.spend) / cal.spend)::numeric(10,2)
         ELSE 0
     END AS roi
-FROM campaign_calendar_fixed cal -- ИСПРАВЛЕНО: берем из правильного CTE
+FROM campaign_calendar_fixed cal
 LEFT JOIN order_stats s ON cal.report_dt = s.report_dt AND cal.campaign_id = s.campaign_id
 LEFT JOIN new_cust_agg n ON cal.report_dt = n.report_dt AND cal.campaign_id = n.campaign_id
 ORDER BY cal.report_dt, cal.campaign_id;

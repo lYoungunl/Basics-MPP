@@ -6,7 +6,6 @@ DROP TABLE IF EXISTS dds.fact_orders CASCADE;
 DROP TABLE IF EXISTS dds.fact_order_items CASCADE;
 
 -- 2. Создание таблиц DDS
-
 CREATE TABLE dds.dim_customers (
     customer_id INT,
     customer_name VARCHAR(100),
@@ -49,7 +48,6 @@ CREATE TABLE dds.fact_orders (
 PARTITION BY RANGE (order_dt)
 (START ('2023-01-01'::date) END ('2024-01-01'::date) EVERY ('1 month'::interval));
 
--- DISTRIBUTED BY (order_id) для корректного джойна
 CREATE TABLE dds.fact_order_items (
     order_item_id INT,
     order_id INT,

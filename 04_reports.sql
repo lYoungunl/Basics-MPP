@@ -51,12 +51,19 @@ FROM cdm.dm_sales_performance
 GROUP BY campaign_name
 HAVING ABS(MAX(campaign_budget) - SUM(spend)) > 0.1; 
 
--- 2. Проверка: нет отрицательных значений в метриках
+-- 2. Проверка: нет отрицательных метрик
 SELECT COUNT(*) AS negative_metrics_count
 FROM cdm.dm_sales_performance
 WHERE revenue < 0 OR spend < 0 OR orders_count < 0 OR customers_count < 0;
 
--- 3. Проверка: новые клиенты не могут быть больше общего количества клиентов
+-- 3. Проверка: новые клиенты не больше общего числа клиентов
 SELECT COUNT(*) AS invalid_new_customers_count
 FROM cdm.dm_sales_performance
 WHERE new_customers > customers_count;
+
+-- 4. Проверка сходимости выручки в CDM и DDS (заказы completed)
+SELECT 
+    (SELECT SUM(revenue) FROM cdm.dm_sales_performance) AS cdm_revenue,
+    (SELECT SUM(order_amount) FROM dds.fact_orders WHERE order_status = 'completed') AS dds_revenue,
+    (SELECT SUM(revenue) FROM cdm.dm_sales_performance) - (SELECT SUM(order_amount) FROM dds.fact_orders WHERE order_status = 'completed') AS diff;
+-- Ожидаемый результат: diff = 0
